@@ -19,23 +19,48 @@ folder_path = 'C:/Users/Thinktechniq/Desktop/Forward College Data Analytics/Caps
 csv_files = glob.glob(os.path.join(folder_path, '*.csv'))
 
 # Load and combine all CSVs
-@st.cache_data
+@st.cache_data(ttl=0)
 def load_data(file_list):
-    df_list = [pd.read_csv(file) for file in file_list]
+
+    df_list = []
+    for file in file_list:
+        df = pd.read_csv(file)
+        df_list.append(df)
+
     combined = pd.concat(df_list, ignore_index=True)
-    
-    # Normalize column names
     combined.columns = combined.columns.str.lower().str.strip()
-    
-    # Convert 'date_reg' to datetime and create 'year_reg'
+
     if 'date_reg' in combined.columns:
-        combined['date_reg'] = pd.to_datetime(combined['date_reg'], errors='coerce')
-        combined['year_reg'] = combined['date_reg'].dt.year
-        # Drop NaN years and convert to int
+
+        combined['date_reg'] = combined['date_reg'].astype(str).str.strip()
+        combined['date_reg'] = combined['date_reg'].str.replace(r'\u00A0', '', regex=True)
+
+        combined['parsed_date'] = pd.to_datetime(
+            combined['date_reg'],
+            dayfirst=True,
+            errors='coerce'
+        )
+
+        failed_mask = combined['parsed_date'].isna() & combined['date_reg'].notna()
+        if failed_mask.any():
+            for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y']:
+                retry_mask = combined['parsed_date'].isna()
+                combined.loc[retry_mask, 'parsed_date'] = pd.to_datetime(
+                    combined.loc[retry_mask, 'date_reg'],
+                    format=fmt,
+                    errors='coerce'
+                )
+
+        still_failed = combined['parsed_date'].isna() & combined['date_reg'].notna()
+        if still_failed.any():
+            combined.loc[still_failed, 'year_reg'] = combined.loc[still_failed, 'date_reg'].str.extract(r'(20\d{2})')[0].astype(float)
+
+        combined.loc[combined['parsed_date'].notna(), 'year_reg'] = combined.loc[combined['parsed_date'].notna(), 'parsed_date'].dt.year
         combined = combined[combined['year_reg'].notna()].copy()
         combined['year_reg'] = combined['year_reg'].astype(int)
+        
     else:
-        st.warning("'date_reg' column is missing. 'year_reg' cannot be created.")
+        pass
 
     return combined
 
@@ -45,9 +70,10 @@ combined_df = load_data(csv_files)
 # Sidebar navigation
 page = st.sidebar.selectbox("Choose a page", ["Homepage", "Data View", "Data Analysis"])
 
+#--
 # Homepage
 if page == "Homepage":
-    st.header("Welcome to the Malaysian Automobile Market Trends Dashboard")
+    st.header("Welcome to the Malaysian Automobile Market Trends Dashboard 2015-2025")
     st.write("""
     This dashboard provides an interactive view of Malaysia’s vehicle registration data from 2015 to 2025,
     with a focus on electric vehicle (EV) adoption trends.
@@ -56,7 +82,10 @@ if page == "Homepage":
     - **Data View** to explore raw records, and
     - **Data Analysis** to view market insights.
     """)
+    
+    # st.write(combined_df.head(10))
 
+#--
 # Data View
 if page == "Data View":
     st.header("Raw Data View")
@@ -66,11 +95,19 @@ if page == "Data View":
 
 # New section: Registrations by Year
     st.subheader("Number of Registrations by Year")
-    reg_by_year=combined_df['year_reg'].value_counts().sort_index()
-    reg_by_year_df=reg_by_year.reset_index()
-    reg_by_year_df.columns=['Year','Number of Registrations']
+    reg_by_year = combined_df['year_reg'].value_counts().sort_index()
+
+# Create DataFrame with year as plain int (no commas)
+    reg_by_year_df = pd.DataFrame({
+        'Year': reg_by_year.index.astype(int),
+        'Number of Registrations': reg_by_year.values.astype(int)
+    })
+
+# Reset index to start at 1
+    reg_by_year_df.index = range(1, len(reg_by_year_df) + 1)
     st.table(reg_by_year_df)
 
+#--
 # Data Analysis
 if page == "Data Analysis":
     st.header("Automobile Market Trends Analysis (2015-2025)")
@@ -187,6 +224,7 @@ By EV car type, sedans and SUVs are the two most popular car types. The most rec
 When looking at fuel types, electric vehicles (EVs) saw the most dramatic rise — from a negligible 0.01% in 2015 to 4.32% in 2025. Notably, its share began to jump only after 2020. Its share remained 0.01% or lower from 2015 to 2020.
 """)
 
+#--
     # Pivot table: registrations by EV maker and year
     # First, filter the dataframe for only EV cars
     fuel_type='electric'
@@ -238,6 +276,7 @@ When looking at fuel types, electric vehicles (EVs) saw the most dramatic rise �
 The EV market experienced considerable shifts in brand dominance. In 2015, Renault held a commanding 81.82% of the EV market (from just 45 cars), but by 2025, the brand had vanished from the EV scene. Other early leaders — such as Nissan and Porsche, which held 72.73% (2019) and 69.65% (2021) market shares respectively — also saw sharp declines. By 2025, Nissan’s share fell to 0.02%, while Porsche dropped to 2.09%.
 """)
 
+#--
     # Filter EV dataset
     df_ev = combined_df[combined_df['fuel'] == 'electric']
     df_ev['model'] = df_ev['model'].astype(str).str.strip().str.title()
@@ -265,7 +304,6 @@ The EV market experienced considerable shifts in brand dominance. In 2015, Renau
 
     # Filter pivot table to only top 15 models (display proportion)
     top_15_models_proportion_pivot=pivot_proportion_model.loc[top_15_models]
-    print(top_15_models_proportion_pivot)
     
     # Prepare data for interactive plot
     df_plot_model = (
@@ -300,7 +338,6 @@ The EV market experienced considerable shifts in brand dominance. In 2015, Renau
 In the EV space, BYD Atto 3 led in sales from its launch until December 2024, when Proton e.MAS 7 entered the market. In 2025, the e.MAS 7 became Malaysia’s best-selling EV model, with 4,003 registrations (23.35%), followed by BYD Atto 3 (1,701 units, 9.92%) and Tesla Model Y (1,571 units, 9.16%).
 """)
         
-
 #--
     # Pivot table: registrations by Chinese vs. Foreign brands and year
     # First, assign the EV car makers (brands) the "Chinese" and "Foreign" region categories according to their country of origin
@@ -372,33 +409,36 @@ Foreign EV brands—such as Tesla, Renault, and Nissan—were the early leaders 
 """)
 
 #--
+# Work on a copy so original df_ev stays unchanged
+    df_ev_copy = df_ev.rename(columns={'model': 'Model'})
 
-    # Map the top 10 EV models with their prices
+# Also rename in combined_df to keep casing consistent
+    combined_df_copy = combined_df.rename(columns={'model': 'Model'})
 
+# Map the top 10 EV models with their prices
     model_price_dict = {
-    'Leaf': 168888,
-    'Zoe': 165000,
-    'Taycan': 575000,
-    'Cooper': 193888,
-    'Model 3':	189000,
-    'Atto 3': 123800,
-    'iX': 385430,
-    'Ativa': 71200,
-    'Model X': 238000,
-    'Twizy': 71888,
-    'Model S': 339000
+        'Leaf': 168888,
+        'Zoe': 165000,
+        'Taycan': 575000,
+        'Cooper': 193888,
+        'Model 3': 189000,
+        'Atto 3': 123800,
+        'iX': 385430,
+        'Model X': 238000,
+        'Twizy': 71888,
+        'Model S': 339000
     }
 
-    # Create cleaned version of model_price_dict
+# Create cleaned version of model_price_dict
     cleaned_model_price_dict = {
         k.strip().replace('\u202f', ' ').replace('\xa0', ' '): v
         for k, v in model_price_dict.items()
     }
-    
-    # Pivot table for EV models by year
+
+# Pivot table for EV models by year
     pivot_ev_model = pd.pivot_table(
-        data=df_ev,
-        index='model',
+        data=df_ev_copy,
+        index='Model',
         columns='year_reg',
         aggfunc='size',
         fill_value=0
@@ -413,11 +453,11 @@ Foreign EV brands—such as Tesla, Renault, and Nissan—were the early leaders 
         .index
         .tolist()
     )
-    
-    # Count registrations for each top EV model
-    top_ev_model_counts = combined_df[combined_df['model'].isin(top_10_ev_models)]['model'].value_counts()
 
-    # Normalize model names (remove weird spaces and non-breaking spaces)
+# Count registrations for each top EV model using renamed combined_df_copy
+    top_ev_model_counts = combined_df_copy[combined_df_copy['Model'].isin(top_10_ev_models)]['Model'].value_counts()
+
+# Normalize model names
     top_ev_model_counts.index = (
         top_ev_model_counts.index
         .str.strip()
@@ -425,30 +465,35 @@ Foreign EV brands—such as Tesla, Renault, and Nissan—were the early leaders 
         .str.replace('\xa0', ' ')
     )
 
-    # Map model names to their prices
+# Map model names to their prices
     top_ev_model_prices = top_ev_model_counts.index.to_series().map(cleaned_model_price_dict)
 
-    # Combine into a DataFrame
+# Combine into a DataFrame (explicitly keeping "Model" as a column)
     ev_model_table = pd.DataFrame({
+        'Model': top_ev_model_counts.index,
         'Registrations': top_ev_model_counts.values,
         'Price (RM)': top_ev_model_prices.values
-        }, index=top_ev_model_counts.index)
+    })
 
-# Optional: sort by registration count
-    ev_model_table = ev_model_table.sort_values(by='Registrations', ascending=False)
+# Sort by registration count
+    ev_model_table = ev_model_table.sort_values(by='Registrations', ascending=False).reset_index(drop=True)
+    ev_model_table.index = range(1, len(ev_model_table) + 1)  # ranks start from 1
 
-# Display the table in Streamlit
+
+# Display in Streamlit
     st.subheader("Top 10 EV Models: Registrations and Prices")
-    st.dataframe(ev_model_table.style.format({"Price (RM)": "RM {:,.0f}"}))
+    st.dataframe(
+    ev_model_table.style
+    .format({"Price (RM)": "{:,.0f}"})
+    )
 
-# Compute weighted median price
+# Weighted median price
     top_ev_model_weighted_median_price = np.median(top_ev_model_prices)
 
-# Display weighted median price in Streamlit
+# Display weighted median price
     st.markdown(f"Weighted median price among top 10 EV models: RM {top_ev_model_weighted_median_price:,.2f}")
 
-#--
-
+#--     
 # WordCloud 1: Malaysian drivers' sentiment on EV car purchase
 
     st.subheader("Public Sentiment on EV Cars (WordCloud)")
