@@ -125,7 +125,7 @@ if page == "Data Analysis":
         fill_value=0
     )
 
-    # ✅ Rename car types
+    # Rename car types
     type_rename_map = {
         'jip': 'SUV',
         'motokar': 'Sedan',
@@ -543,4 +543,5 @@ Foreign EV brands—such as Tesla, Renault, and Nissan—were the early leaders 
     st.markdown("""
     Keywords: Save, cost, charger
     """)
+
 
